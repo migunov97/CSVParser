@@ -18,8 +18,111 @@
 
 // Вопросы можно задавать сюда https://t.me/fexolm
 
+
+// Returns float and moves iterator to symbol after the float.
+// Does not check if begin points on numeric symbol or dot or '-'
+static float pCharToFloat (std::string::iterator& it)
+{
+    float result = 0;
+    bool wasDot = false;
+    bool isNegative = (*it == '-');
+    if (isNegative)
+    {
+        ++it;
+    }
+
+    for (;; ++it)
+    {
+        const char c = *it;
+        if('0' <= c && c <= '9')
+            result = result*10 + (c - '0');
+        else 
+        {
+            if (c == '.')
+            {
+                wasDot = true;
+                ++it;
+            }
+            break;
+        }
+    }
+    
+    if (wasDot)
+    {
+        float multiplier = 0.1;
+        for (;; ++it)
+        {
+            const char c = *it;
+            if ('0' <= c && c <= '9')
+            {
+                result += (c - '0') * multiplier;
+                multiplier /= 10.;
+            }
+            else 
+            {
+                break;
+            }    
+        }
+    }
+
+    if (isNegative)
+        result *=-1;
+
+    return result;
+}
+
+// Returns unsigned int (it means no sign check) and moves iterator to first char after int
+// Does not check if begin points on numeric symbol 
+static int pCharToInt(std::string::iterator& it)
+{
+    int result = 0;
+    for (; ; ++it)
+    {
+        const auto c = *it;
+        if('0' <= c && c <= '9')
+            result = result*10 + (c - '0');
+        else
+            break;
+    }
+    return result;
+}
+
+// Returns string from @it to ',' and moves iterator to ','
+static std::string pCharToString (std::string::iterator& it)
+{
+    std::string result;
+    constexpr size_t maxStrSize = 50;
+    result.reserve(maxStrSize);
+
+    for (;; ++it)
+    {
+        const char c = *it;
+        if(c == ',')
+            break;
+
+        result.push_back(c);
+    }
+    return result;
+}
+
 struct Row
 {
+    // Constructor with strings moving
+    Row(std::string&& key, float fare_amount, std::string&& pickup_datetime,
+        float pickup_longitude, float pickup_latitude, float dropoff_longitude,
+        float dropoff_latitude, int passenger_count):
+    key(key),
+    fare_amount(fare_amount),
+    pickup_datetime(pickup_datetime),
+    pickup_longitude(pickup_longitude),
+    pickup_latitude(pickup_latitude),
+    dropoff_longitude(dropoff_longitude),
+    dropoff_latitude(dropoff_latitude),
+    passenger_count(passenger_count)
+    {
+    }
+
+
     std::string key;
     float fare_amount;
     std::string pickup_datetime;
@@ -62,10 +165,11 @@ private:
     std::vector<std::vector<Row>> rows;
 };
 
-// Returns std::vector of rows, which are written in string from start to begin
-// size shows recommended size to reserve
-static std::vector<Row> getRows(std::string::iterator begin, std::string::iterator end,
-                         size_t size)
+// Returns std::vector of rows, which are written in string from @begin to @end.
+// @size shows recommended size to reserve
+static std::vector<Row> getRows(std::string::iterator begin,
+                                std::string::iterator end,
+                                size_t size)
 {
     std::vector<Row> rows;
     rows.reserve(size);
@@ -73,43 +177,43 @@ static std::vector<Row> getRows(std::string::iterator begin, std::string::iterat
 
     while (it != end)
     {
-
+        // Read string only once. Interpretate it while reading 
+        std::string key = pCharToString(it);
+        ++it;
         
-        Row row;
+        const float fareAmount = pCharToFloat(it);
+        ++it;
 
-        {
-            auto keyEnd = std::find(it, end, ',');
-            row.key.assign(&*it, std::distance(it, keyEnd));
-            it = ++keyEnd;
-        }
+        std::string datetime = pCharToString(it);
+        ++it;
 
-        row.fare_amount = atof(&*it);
-        it = ++std::find(it, end, ',');
+        const float pickupLongitude = pCharToFloat(it);
+        ++it;
 
-        {
-            auto datetimeEnd = std::find(it, end, ',');
-            row.pickup_datetime.assign(&*it, std::distance(it, datetimeEnd));
-            it = ++datetimeEnd;
-        }
+        const float pickupLatitude = pCharToFloat(it);
+        ++it;
 
-        row.pickup_longitude = atof(&*it);
-        it = ++std::find(it, end, ',');
+        const float dropoffLongitude = pCharToFloat(it);
+        ++it;
 
-        row.pickup_latitude = atof(&*it);
-        it = ++std::find(it, end, ',');
+        const float dropoffLatitude = pCharToFloat(it);
+        ++it;
 
-        row.dropoff_longitude = atof(&*it);
-        it = ++std::find(it, end, ',');
-
-        row.dropoff_latitude = atof(&*it);
-        it = ++std::find(it, end, ',');
-
-        row.passenger_count = std::atoi(&*it);
-
+        const int passengerCount = pCharToInt(it);
         it = ++std::find(it, end, '\n');
 
-        rows.push_back(row);
+        // Call Row's constructor once
+        rows.emplace_back(
+            std::move(key), 
+            fareAmount,
+            std::move(datetime),
+            pickupLongitude,
+            pickupLatitude,
+            dropoffLongitude,
+            dropoffLatitude,
+            passengerCount);
     }
+
     return rows;
 }
 
@@ -138,7 +242,7 @@ Table read_csv(const char *filename)
     rows.resize(threadsNb);
 
     std::vector<std::thread> threads;
-
+    
     const size_t substringSize = size / threadsNb;
 
     for (size_t i = 0; i < threadsNb; ++i)
@@ -154,7 +258,7 @@ Table read_csv(const char *filename)
         auto parsePart = [&rows, begin, end, smallStringSize, i](){       
         rows[i] = getRows(begin, end, std::distance(begin, end) / smallStringSize);
         };
-
+    
         threads.push_back(std::thread (parsePart));
     }
 
